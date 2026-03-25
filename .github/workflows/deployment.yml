@@ -16,7 +16,7 @@ on:
           - production
           - staging
       platforms:
-        description: "Target platforms"
+        description: "Target platforms (comma-separated: linux,windows,macos)"
         default: "linux,windows,macos"
         type: string
       release:
@@ -31,27 +31,26 @@ jobs:
       - name: Validate tag format
         run: |
           if [[ ! "${{ inputs.tag_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Invalid tag format (use v1.2.3)"
+            echo "❌ Invalid tag format. Must be in the form v1.2.3"
             exit 1
           fi
 
   build:
     needs: validate
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         os: [linux, windows, macos]
 
     steps:
-      - name: Skip unwanted platforms
+      - name: Skip platforms not requested
         run: |
-          if [[ "${{ inputs.platforms }}" != *"${{ matrix.os }}"* ]]; then
-            echo "Skipping ${{ matrix.os }}"
+          if [[ ! "${{ inputs.platforms }}" =~ "${{ matrix.os }}" ]]; then
+            echo "Skipping build for ${{ matrix.os }}"
             exit 0
           fi
 
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Go
@@ -65,18 +64,17 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p dist
-
-          if [ "${{ matrix.os }}" = "linux" ]; then
-            GOOS=linux GOARCH=amd64 go build -o dist/cli-linux
-          fi
-
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            GOOS=windows GOARCH=amd64 go build -o dist/cli-windows.exe
-          fi
-
-          if [ "${{ matrix.os }}" = "macos" ]; then
-            GOOS=darwin GOARCH=amd64 go build -o dist/cli-macos
-          fi
+          case "${{ matrix.os }}" in
+            linux)
+              GOOS=linux GOARCH=amd64 go build -o dist/cli-linux
+              ;;
+            windows)
+              GOOS=windows GOARCH=amd64 go build -o dist/cli-windows.exe
+              ;;
+            macos)
+              GOOS=darwin GOARCH=amd64 go build -o dist/cli-macos
+              ;;
+          esac
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -88,22 +86,21 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: inputs.release
-
     permissions:
       contents: write
 
     steps:
-      - name: Download artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
 
       - name: Prepare release files
         run: |
-          mkdir dist
-          cp -r linux/* dist/ || true
-          cp -r windows/* dist/ || true
-          cp -r macos/* dist/ || true
+          mkdir -p dist
+          cp -r linux/* dist/ 2>/dev/null || true
+          cp -r windows/* dist/ 2>/dev/null || true
+          cp -r macos/* dist/ 2>/dev/null || true
 
-      - name: Generate checksums
+      - name: Generate SHA256 checksums
         run: |
           cd dist
           sha256sum * > checksums.txt
