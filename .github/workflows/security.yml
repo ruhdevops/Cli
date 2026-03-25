@@ -1,0 +1,23 @@
+name: Security
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  vuln-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: go.mod
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run scan
+        run: govulncheck ./...

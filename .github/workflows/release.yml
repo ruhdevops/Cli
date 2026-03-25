@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          mkdir dist
+          GOOS=windows GOARCH=amd64 go build -o dist/cli-windows.exe
+          GOOS=linux GOARCH=amd64 go build -o dist/cli-linux
+          GOOS=darwin GOARCH=amd64 go build -o dist/cli-mac
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
