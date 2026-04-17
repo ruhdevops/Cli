@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	dirMode  os.FileMode = 0700
-	fileMode os.FileMode = 0600
-	execMode os.FileMode = 0700
+	dirMode  os.FileMode = 0755
+	fileMode os.FileMode = 0644
+	execMode os.FileMode = 0755
 )
 
 // ExtractZip extracts the contents of a zip archive to destDir.
