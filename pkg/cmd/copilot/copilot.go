@@ -291,7 +291,7 @@ func downloadCopilot(httpClient *http.Client, ios *iostreams.IOStreams, installD
 		return "", fmt.Errorf("failed to seek temp file: %w", err)
 	}
 
-	if err := os.MkdirAll(installDir, 0755); err != nil {
+	if err := os.MkdirAll(installDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create install directory: %w", err)
 	}
 
@@ -414,10 +414,12 @@ func extractTarGz(r io.Reader, destDir string) error {
 		target := absFilePath.String()
 
 		if header.Typeflag == tar.TypeReg {
-			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
 				return fmt.Errorf("failed to create parent directory: %w", err)
 			}
-			if err := extractFile(target, os.FileMode(header.Mode)&0777, tr); err != nil {
+			// Tighten binary permissions to user-only.
+			mode := os.FileMode(header.Mode) & 0700
+			if err := extractFile(target, mode, tr); err != nil {
 				return err
 			}
 		}
