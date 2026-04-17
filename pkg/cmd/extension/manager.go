@@ -212,7 +212,7 @@ func (m *Manager) InstallLocal(dir string) error {
 	}
 	targetLink := filepath.Join(m.installDir(), name)
 
-	if err := os.MkdirAll(filepath.Dir(targetLink), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(targetLink), 0700); err != nil {
 		return err
 	}
 	if err := makeSymlink(dir, targetLink); err != nil {
@@ -339,7 +339,7 @@ func (m *Manager) installBin(repo ghrepo.Interface, target string) error {
 	}
 
 	targetDir := filepath.Join(m.installDir(), name)
-	if err = os.MkdirAll(targetDir, 0755); err != nil {
+	if err = os.MkdirAll(targetDir, 0700); err != nil {
 		return fmt.Errorf("failed to create installation directory: %w", err)
 	}
 
@@ -721,7 +721,7 @@ func isSymlink(m os.FileMode) bool {
 
 func writeFile(p string, contents []byte, mode os.FileMode) error {
 	if dir := filepath.Dir(p); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
 	}

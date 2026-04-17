@@ -94,7 +94,7 @@ func downloadAsset(httpClient *http.Client, asset releaseAsset, destPath string)
 	}
 
 	var f *os.File
-	if f, downloadErr = os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755); downloadErr != nil {
+	if f, downloadErr = os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700); downloadErr != nil {
 		return
 	}
 	defer func() {
