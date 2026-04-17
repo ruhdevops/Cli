@@ -1,37 +1,41 @@
 package jsoncolor
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io"
 )
 
-const (
-	colorDelim  = "1;38" // bright white
-	colorKey    = "1;34" // bright blue
-	colorNull   = "36"   // cyan
-	colorString = "32"   // green
-	colorBool   = "33"   // yellow
+var (
+	colorDelimEsc  = []byte("\x1b[1;38m")
+	colorKeyEsc    = []byte("\x1b[1;34m")
+	colorNullEsc   = []byte("\x1b[36m")
+	colorStringEsc = []byte("\x1b[32m")
+	colorBoolEsc   = []byte("\x1b[33m")
+	escReset       = []byte("\x1b[m")
 )
 
 var (
-	escPrefix = []byte("\x1b[")
-	escSuffix = []byte("m")
-	escReset  = []byte("\x1b[m")
+	byteColon   = []byte(":")
+	byteComma   = []byte(",")
+	byteSpace   = []byte(" ")
+	byteNewline = []byte("\n")
+	byteTrue    = []byte("true")
+	byteFalse   = []byte("false")
+	byteNull    = []byte("null")
+	byteLBrace  = []byte("{")
+	byteRBrace  = []byte("}")
+	byteLBracket = []byte("[")
+	byteRBracket = []byte("]")
 )
 
 type JsonWriter interface {
 	Preface() []json.Delim
 }
 
-func writeColor(w io.Writer, color string, value []byte) error {
-	if _, err := w.Write(escPrefix); err != nil {
-		return err
-	}
-	if _, err := io.WriteString(w, color); err != nil {
-		return err
-	}
-	if _, err := w.Write(escSuffix); err != nil {
+func writeColor(w io.Writer, colorEsc []byte, value []byte) error {
+	if _, err := w.Write(colorEsc); err != nil {
 		return err
 	}
 	if _, err := w.Write(value); err != nil {
@@ -42,6 +46,9 @@ func writeColor(w io.Writer, color string, value []byte) error {
 }
 
 func writeIndent(w io.Writer, indent string, level int) error {
+	if level <= 0 {
+		return nil
+	}
 	for i := 0; i < level; i++ {
 		if _, err := io.WriteString(w, indent); err != nil {
 			return err
@@ -54,6 +61,9 @@ func writeIndent(w io.Writer, indent string, level int) error {
 // Optimized to reduce allocations by avoiding fmt.Fprintf and strings.Repeat.
 // Benchmark results show ~33% improvement in execution time and ~12% reduction in memory usage.
 func Write(w io.Writer, r io.Reader, indent string) error {
+	bw := bufio.NewWriter(w)
+	defer bw.Flush()
+
 	dec := json.NewDecoder(r)
 	dec.UseNumber()
 
@@ -63,6 +73,10 @@ func Write(w io.Writer, r io.Reader, indent string) error {
 	if jsonWriter, ok := w.(JsonWriter); ok {
 		stack = append(stack, jsonWriter.Preface()...)
 	}
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
 
 	for {
 		t, err := dec.Token()
@@ -79,14 +93,20 @@ func Write(w io.Writer, r io.Reader, indent string) error {
 			case '{', '[':
 				stack = append(stack, tt)
 				idx = 0
-				if err := writeColor(w, colorDelim, []byte{byte(tt)}); err != nil {
+				var b []byte
+				if tt == '{' {
+					b = byteLBrace
+				} else {
+					b = byteLBracket
+				}
+				if err := writeColor(bw, colorDelimEsc, b); err != nil {
 					return err
 				}
 				if dec.More() {
-					if _, err := w.Write([]byte{'\n'}); err != nil {
+					if _, err := bw.Write(byteNewline); err != nil {
 						return err
 					}
-					if err := writeIndent(w, indent, len(stack)); err != nil {
+					if err := writeIndent(bw, indent, len(stack)); err != nil {
 						return err
 					}
 				}
@@ -94,49 +114,72 @@ func Write(w io.Writer, r io.Reader, indent string) error {
 			case '}', ']':
 				stack = stack[:len(stack)-1]
 				idx = 0
-				if err := writeColor(w, colorDelim, []byte{byte(tt)}); err != nil {
+				var b []byte
+				if tt == '}' {
+					b = byteRBrace
+				} else {
+					b = byteRBracket
+				}
+				if err := writeColor(bw, colorDelimEsc, b); err != nil {
 					return err
 				}
 			}
 		default:
-			b, err := marshalJSON(tt)
-			if err != nil {
-				return err
-			}
-
 			isKey := len(stack) > 0 && stack[len(stack)-1] == '{' && idx%2 == 0
 			idx++
 
-			var color string
+			var colorEsc []byte
+			var b []byte
+
 			if isKey {
-				color = colorKey
+				colorEsc = colorKeyEsc
 			} else if tt == nil {
-				color = colorNull
+				colorEsc = colorNullEsc
+				b = byteNull
 			} else {
-				switch t.(type) {
+				switch v := tt.(type) {
 				case string:
-					color = colorString
+					colorEsc = colorStringEsc
 				case bool:
-					color = colorBool
+					colorEsc = colorBoolEsc
+					if v {
+						b = byteTrue
+					} else {
+						b = byteFalse
+					}
+				case json.Number:
+					b = []byte(v.String())
 				}
 			}
 
-			if color == "" {
-				if _, err := w.Write(b); err != nil {
+			if b == nil {
+				buf.Reset()
+				if err := enc.Encode(tt); err != nil {
+					return err
+				}
+				b = buf.Bytes()
+				// omit trailing newline added by json.Encoder
+				if len(b) > 0 && b[len(b)-1] == '\n' {
+					b = b[:len(b)-1]
+				}
+			}
+
+			if colorEsc == nil {
+				if _, err := bw.Write(b); err != nil {
 					return err
 				}
 			} else {
-				if err := writeColor(w, color, b); err != nil {
+				if err := writeColor(bw, colorEsc, b); err != nil {
 					return err
 				}
 			}
 
 			if isKey {
 				// \x1b[1;38m:\x1b[m
-				if err := writeColor(w, colorDelim, []byte{':'}); err != nil {
+				if err := writeColor(bw, colorDelimEsc, byteColon); err != nil {
 					return err
 				}
-				if _, err := w.Write([]byte{' '}); err != nil {
+				if _, err := bw.Write(byteSpace); err != nil {
 					return err
 				}
 				continue
@@ -145,24 +188,24 @@ func Write(w io.Writer, r io.Reader, indent string) error {
 
 		if dec.More() {
 			// \x1b[1;38m,\x1b[m\n
-			if err := writeColor(w, colorDelim, []byte{','}); err != nil {
+			if err := writeColor(bw, colorDelimEsc, byteComma); err != nil {
 				return err
 			}
-			if _, err := w.Write([]byte{'\n'}); err != nil {
+			if _, err := bw.Write(byteNewline); err != nil {
 				return err
 			}
-			if err := writeIndent(w, indent, len(stack)); err != nil {
+			if err := writeIndent(bw, indent, len(stack)); err != nil {
 				return err
 			}
 		} else if len(stack) > 0 {
-			if _, err := w.Write([]byte{'\n'}); err != nil {
+			if _, err := bw.Write(byteNewline); err != nil {
 				return err
 			}
-			if err := writeIndent(w, indent, len(stack)-1); err != nil {
+			if err := writeIndent(bw, indent, len(stack)-1); err != nil {
 				return err
 			}
 		} else {
-			if _, err := w.Write([]byte{'\n'}); err != nil {
+			if _, err := bw.Write(byteNewline); err != nil {
 				return err
 			}
 		}
@@ -179,27 +222,12 @@ func WriteDelims(w io.Writer, delims, indent string) error {
 		stack = jaw.Preface()
 	}
 
-	if err := writeColor(w, colorDelim, []byte(delims)); err != nil {
+	if err := writeColor(w, colorDelimEsc, []byte(delims)); err != nil {
 		return err
 	}
-	if _, err := w.Write([]byte{'\n'}); err != nil {
+	if _, err := w.Write(byteNewline); err != nil {
 		return err
 	}
 	return writeIndent(w, indent, len(stack))
 }
 
-// marshalJSON works like json.Marshal but with HTML-escaping disabled
-func marshalJSON(v interface{}) ([]byte, error) {
-	buf := bytes.Buffer{}
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		return nil, err
-	}
-	bb := buf.Bytes()
-	// omit trailing newline added by json.Encoder
-	if len(bb) > 0 && bb[len(bb)-1] == '\n' {
-		return bb[:len(bb)-1], nil
-	}
-	return bb, nil
-}
